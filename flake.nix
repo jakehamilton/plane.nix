@@ -9,6 +9,17 @@
       url = "github:snowfallorg/lib";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+		mach-nix = {
+			url = "github:DavHau/mach-nix";
+			inputs.nixpkgs.follows = "nixpkgs";
+			inputs.pypi-deps-db.follows = "pypi-deps-db";
+		};
+
+		pypi-deps-db = {
+			url = "github:jakehamilton/pypi-deps-db";
+			inputs.nixpkgs.follows = "nixpkgs";
+		};
   };
 
   outputs = inputs:

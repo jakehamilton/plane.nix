@@ -1,3 +1,3 @@
 #!/usr/bin/env bash
 
-exec @node@ @server@
+exec @python@ @file@
