@@ -2,7 +2,7 @@
   description = "Nix support for plane.so";
 
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-23.11";
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-24.05";
     unstable.url = "github:nixos/nixpkgs/nixos-unstable";
 
     snowfall-lib = {
@@ -10,14 +10,8 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-		mach-nix = {
-			url = "github:DavHau/mach-nix";
-			inputs.nixpkgs.follows = "nixpkgs";
-			inputs.pypi-deps-db.follows = "pypi-deps-db";
-		};
-
-		pypi-deps-db = {
-			url = "github:jakehamilton/pypi-deps-db";
+		poetry2nix = {
+			url = "github:nix-community/poetry2nix";
 			inputs.nixpkgs.follows = "nixpkgs";
 		};
   };

@@ -1,12 +1,10 @@
-{ lib, pkgs, inputs }:
+{ lib, pkgs }:
 
 let
   inherit (pkgs.yarn2nix-moretea) mkYarnWorkspace;
 
-	mach-nix = import inputs.mach-nix {
+	poetry2nix = lib.poetry2nix.mkPoetry2Nix {
 		inherit pkgs;
-		python = "python310";
-		pypiData = "${inputs.pypi-deps-db}";
 	};
 
 	jq = lib.getExe pkgs.jq;
@@ -15,11 +13,18 @@ let
     owner = "makeplane";
     repo = "plane";
 		rev = "707570ca7ab95d6680953de939f6acf78480ae01";
-		sha256 = "09kn6y8s6ziqmpn8x4cfsis3q5a9ii6ckvm3b71l73w7j78f70zq";
+		sha256 = "sha256-ereRnfUB/BGWW5YmjVLSq4Rh9y7+LmPrb0HNEzBu1sk=";
 
 		# TODO: Upgrade to latest when `web` no longer fails to build.
     # rev = "0068ea93deeef5ef2f52f6116483a42c738bce06";
     # sha256 = "06pfjzzymf0kz1zbpqz6ql137bp0yizfhx34kspvljqrd9v362z5";
+
+		postFetch = ''
+			cd $out
+
+			patch -p1 < ${./patches/poetry.patch}
+			patch -p1 < ${./patches/runtime-dir.patch}
+		'';
   };
 
 	includeNodeModulesPath = ''
@@ -171,182 +176,21 @@ let
     };
   };
 
-	jsonmodels = pkgs.python3.pkgs.buildPythonPackage rec {
-		pname = "jsonmodels";
-		version = "2.7.0";
-		format = "setuptools";
+	apiserver = poetry2nix.mkPoetryEnv {
+		projectDir = "${src}/apiserver";
 
-		src = pkgs.fetchPypi {
-			inherit pname version;
-			hash = "sha256-jAGb8b0lKsPkARJ1B9c16g/WzjCSGAK1/Fx2HNQaGLs=";
-		};
 
-		dependencies = with pkgs.python3.pkgs; [
-			jinja2
-			markupsafe
-			pygments
-			sphinx
-			coverage
-			docutils
-			flake8
-			invoke
-			importlib-metadata
-			mccabe
-			pep8
-			py
-			pyflakes
-			pytest-cov
-			sphinxcontrib-spelling
-			tox
-			virtualenv
-			wheel
-		];
-	};
+		preferWheels = true;
 
-	apiserverPython = pkgs.python3.withPackages (ps: with ps; [
-		django
-		djangorestframework
-		psycopg
-		dj-database-url
-		redis
-		django-redis
-		django-cors-headers
-		celery
-		django-celery-beat
-		whitenoise
-		faker
-		django-filter
-		jsonmodels
-		sentry-sdk
-		django-storages
-		# django-crum
-		uvicorn
-		channels
-		openai
-		# slacksdk
-		# scout-apm
-		openpyxl
-		python-json-logger
-		beautifulsoup4
-		posthog
-		cryptography
-		lxml
-		boto3
-		# zxvbn
-		pytz
-		pyjwt
-	]);
-
-	apiserver = mach-nix.buildPythonApplication {
-		pname = "plane-apiserver";
-		version = "v0.22-dev";
-
-		src = "${src}/apiserver";
-
-		patches = [
-			./runtime-dir.patch
-		];
-
-		python = "python310";
-
-		format = "other";
-
-		nativeBuildInputs = [
-			pkgs.makeWrapper
-		];
-
-		setuptoolsBuildPhase = "";
-
-		installPhase = ''
-			rm -rf bin
-
-			mkdir -p $out/libexec/$pname
-
-			cp -r ./* $out/libexec/$pname/
-
-			mkdir -p $out/bin
-
-			makeWrapper ${pkgs.python310}/bin/python $out/bin/apiserver \
-				--set PYTHONPATH "$PYTHONPATH" \
-				--add-flags "$out/libexec/$pname/manage.py"
-
-			# cp ${./apiserver.sh} $out/bin/apiserver
-			#
-			# substituteInPlace $out/bin/apiserver \
-			# 	--replace "python" $(${pkgs.which}/bin/which python) \
-			# 	--replace "file" $out/libexec/$pname/manage.py
-			#
-			# chmod +x $out/bin/apiserver
-		'';
-
-		_.psycopg-c.nativeBuildInputs.add = [
-			pkgs.postgresql_15
-		];
-
-		requirements = ''
-			gunicorn
-			# django
-			Django
-			# rest framework
-			djangorestframework
-			# postgres 
-			psycopg
-			psycopg-binary
-			psycopg-c
-			dj-database-url
-			# redis
-			redis
-			django-redis
-			# cors
-			django-cors-headers
-			# celery
-			celery
-			django_celery_beat
-			# file serve
-			whitenoise
-			# fake data
-			faker
-			# filters
-			django-filter
-			# json model
-			jsonmodels
-			# sentry
-			sentry-sdk
-			# storage
-			django-storages
-			# user management
-			django-crum
-			# web server
-			uvicorn
-			# sockets
-			channels
-			# ai
-			openai
-			# slack
-			slack-sdk
-			# apm
-			scout-apm
-			# xlsx generation
-			openpyxl
-			# logging
-			python-json-logger
-			# html parser
-			beautifulsoup4
-			# analytics
-			posthog
-			# crypto
-			cryptography
-			# html validator
-			lxml
-			# s3
-			boto3
-			# password validator
-			zxcvbn
-			# timezone
-			pytz
-			# jwt
-			PyJWT
-		'';
+		overrides = poetry2nix.overrides.withDefaults (final: prev: {
+			psycopg-c = prev.psycopg-c.overridePythonAttrs (old: {
+				preferWheel = true;
+				nativeBuildInputs = old.nativeBuildInputs ++ [
+					pkgs.postgresql
+					prev.tomli
+				];
+			});
+		});
 	};
 
 	plane = pkgs.runCommandNoCC
@@ -375,8 +219,6 @@ let
 			makeWrapper ${workspace.web}/bin/serve $out/bin/web
 
 			mkdir -p $out/libexec
-
-			ln -s ${apiserver}/libexec/${apiserver.pname} $out/libexec/apiserver
 		'';
 in
 	(builtins.trace (builtins.attrNames workspace))
