@@ -21,5 +21,7 @@
       inherit inputs;
 
       src = ./.;
+
+			alias.packages.default = "plane";
     };
 }
