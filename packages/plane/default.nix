@@ -1,4 +1,10 @@
-{ lib, pkgs }:
+{
+	lib,
+	pkgs,
+	API_BASE_URL ? "/api",
+	ADMIN_BASE_URL ? "/god-mode",
+	SPACE_BASE_URL ? "/space",
+}:
 
 let
   inherit (pkgs.yarn2nix-moretea) mkYarnWorkspace;
@@ -12,18 +18,16 @@ let
   src = pkgs.fetchFromGitHub {
     owner = "makeplane";
     repo = "plane";
+		# v0.22-dev
 		rev = "707570ca7ab95d6680953de939f6acf78480ae01";
-		sha256 = "sha256-pyYykaBl0G2iJOXCkTNDE3Y6+UylF2zPCSIFwTImzb4=";
-
-		# TODO: Upgrade to latest when `web` no longer fails to build.
-    # rev = "0068ea93deeef5ef2f52f6116483a42c738bce06";
-    # sha256 = "06pfjzzymf0kz1zbpqz6ql137bp0yizfhx34kspvljqrd9v362z5";
+		sha256 = "sha256-gu1AaE3NpRhTA5US3Chpa/tAqVnQdDFGwJR6AzzSUjI=";
 
 		postFetch = ''
 			cd $out
 
 			patch -p1 < ${./patches/poetry.patch}
 			patch -p1 < ${./patches/runtime.patch}
+			patch -p1 < ${./patches/x-forwarded-for.patch}
 		'';
   };
 
@@ -62,8 +66,21 @@ let
 
 		./node_modules/.bin/next build --experimental-build-mode compile
 
+		popd
+	'';
+
+	addStatic = ''
+		pushd $out/libexec/$pname/deps/$pname
+
 		mkdir -p .next/standalone/.next
-		mv .next/static .next/standalone/.next/
+
+		ln -s $(pwd)/.next/static .next/standalone/.next/static
+		ln -s $(pwd)/.next/static $out/static
+
+		if [ -d public ]; then
+			ln -s $(pwd)/public .next/standalone/public
+			ln -s $(pwd)/public $out/public
+		fi
 
 		popd
 	'';
@@ -120,6 +137,10 @@ let
       admin = {
 				doDist = false;
 
+				NEXT_PUBLIC_API_BASE_URL = API_BASE_URL;
+				NEXT_PUBLIC_ADMIN_BASE_PATH = ADMIN_BASE_URL;
+				NEXT_PUBLIC_SPACE_BASE_PATH = SPACE_BASE_URL;
+
 				nativeBuildInputs = [
 					pkgs.makeWrapper
 				];
@@ -134,12 +155,17 @@ let
 
 				postInstall = ''
 					${addServerBin}
+					${addStatic}
 				'';
       };
 
       space = {
 				doDist = false;
 
+				NEXT_PUBLIC_API_BASE_URL = API_BASE_URL;
+				NEXT_PUBLIC_ADMIN_BASE_PATH = ADMIN_BASE_URL;
+				NEXT_PUBLIC_SPACE_BASE_PATH = SPACE_BASE_URL;
+
 				nativeBuildInputs = [
 					pkgs.makeWrapper
 				];
@@ -154,12 +180,17 @@ let
 
 				postInstall = ''
 					${addServerBin}
+					${addStatic}
 				'';
       };
 
       web = {
 				doDist = false;
 
+				NEXT_PUBLIC_API_BASE_URL = API_BASE_URL;
+				NEXT_PUBLIC_ADMIN_BASE_PATH = ADMIN_BASE_URL;
+				NEXT_PUBLIC_SPACE_BASE_PATH = SPACE_BASE_URL;
+
 				nativeBuildInputs = [
 					pkgs.makeWrapper
 				];
@@ -174,6 +205,7 @@ let
 
 				postInstall = ''
 					${addServerBin}
+					${addStatic}
 				'';
       };
     };

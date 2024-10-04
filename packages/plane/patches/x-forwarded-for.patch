@@ -1,0 +1,32 @@
+diff --git a/apiserver/plane/middleware/x_forwarded_for_middleware.py b/apiserver/plane/middleware/x_forwarded_for_middleware.py
+new file mode 100644
+index 000000000..bbee16ba6
+--- /dev/null
++++ b/apiserver/plane/middleware/x_forwarded_for_middleware.py
+@@ -0,0 +1,14 @@
++class XForwardedForMiddleware():
++    def __init__(self, get_response):
++        self.get_response = get_response
++
++    def __call__(self, request):
++        self.process_request(request)
++        return self.get_response(request)
++
++    def process_request(self, request):
++        if "HTTP_X_FORWARDED_FOR" in request.META:
++            request.META["HTTP_X_PROXY_REMOTE_ADDR"] = request.META["REMOTE_ADDR"]
++
++            parts = request.META["HTTP_X_FORWARDED_FOR"].split(",")
++            request.META["REMOTE_ADDR"] = parts[0].strip()
+diff --git a/apiserver/plane/settings/common.py b/apiserver/plane/settings/common.py
+index 937ff0c2a..75864d05d 100644
+--- a/apiserver/plane/settings/common.py
++++ b/apiserver/plane/settings/common.py
+@@ -65,6 +65,7 @@ MIDDLEWARE = [
+     "crum.CurrentRequestUserMiddleware",
+     "django.middleware.gzip.GZipMiddleware",
+     "plane.middleware.api_log_middleware.APITokenLogMiddleware",
++    "plane.middleware.x_forwarded_for_middleware.XForwardedForMiddleware",
+ ]
+ 
+ # Rest Framework settings
