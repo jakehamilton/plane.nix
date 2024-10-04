@@ -2,7 +2,7 @@
 	lib,
 	pkgs,
 	API_BASE_URL ? "/api",
-	ADMIN_BASE_URL ? "/god-mode",
+	ADMIN_BASE_URL ? "/admin",
 	SPACE_BASE_URL ? "/space",
 }:
 
