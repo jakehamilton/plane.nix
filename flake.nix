@@ -23,5 +23,9 @@
       src = ./.;
 
 			alias.packages.default = "plane";
+
+			snowfall = {
+				namespace = "plane-nix";
+			};
     };
 }

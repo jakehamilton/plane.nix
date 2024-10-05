@@ -15,13 +15,10 @@ let
 
     GUNICORN_WORKERS = builtins.toString cfg.api.workers;
 
-    DATABASE_URL = "postgresql://${cfg.database.user}:${cfg.database.password}@${cfg.database.host}:${toString cfg.database.port}/${cfg.database.name}";
     REDIS_URL = "redis://${cfg.cache.host}:${toString cfg.cache.port}";
 
     USE_MINIO = if cfg.storage.local then "1" else "0";
     AWS_REGION = cfg.storage.region;
-    AWS_ACCESS_KEY_ID = cfg.storage.accessKey;
-    AWS_SECRET_ACCESS_KEY = cfg.storage.secretKey;
     AWS_S3_ENDPOINT_URL = "${cfg.storage.protocol}://${cfg.storage.host}:${toString cfg.storage.port}";
     AWS_S3_BUCKET_NAME = cfg.storage.bucket;
 
@@ -33,10 +30,42 @@ let
 
     PYTHONPATH = "${cfg.package.apiserver}/${cfg.package.apiserver.python.sitePackages}";
 
-		SECRET_KEY = cfg.secretKey;
 		CORS_ALLOWED_ORIGINS = "http://${cfg.domain},http://127.0.0.1,http://localhost,https://${cfg.domain},https://127.0.0.1,https://localhost";
 		COOKIE_DOMAIN = cfg.domain;
   };
+
+	withDatabase = text: ''
+		db_pass="$(cat ${cfg.database.passwordFile})"
+
+		export DATABASE_URL="postgresql://${cfg.database.user}:$db_pass@${cfg.database.host}:${builtins.toString cfg.database.port}/${cfg.database.name}"
+
+		${text}
+	'';
+
+	withStorage = text: ''
+		set -a
+		if [ -n "${cfg.storage.credentialsFile}" ]; then
+			source ${cfg.storage.credentialsFile}
+		fi
+		set +a
+
+		export AWS_ACCESS_KEY_ID=''${MINIO_ROOT_USER:-"minioadmin"}
+		export AWS_SECRET_ACCESS_KEY=''${MINIO_ROOT_PASSWORD:-"minioadmin"}
+
+		${text}
+	'';
+
+	withSecretKey = text: ''
+		export SECRET_KEY="$(cat ${cfg.secretKeyFile})"
+
+		${text}
+	'';
+
+	withSecrets = text: lib.pipe text [
+		withDatabase
+		withStorage
+		withSecretKey
+	];
 in
 {
   options.services.plane = {
@@ -44,7 +73,7 @@ in
 
     package = lib.mkOption {
       type = lib.types.package;
-      default = pkgs.plane;
+      default = pkgs.plane-nix.plane;
       description = "The Plane package to use.";
     };
 
@@ -71,10 +100,9 @@ in
       description = "The state directory for the Plane service.";
     };
 
-		secretKey = lib.mkOption {
-			type = lib.types.str;
-			default = "CHANGEME";
-			description = "The secret key to use for the Plane service.";
+		secretKeyFile = lib.mkOption {
+      type = lib.types.str;
+      description = "The secret key file for the Plane service.";
 		};
 
     web = {
@@ -124,11 +152,9 @@ in
         description = "The user to use for the Plane database.";
       };
 
-      # FIXME: This should be `passwordFile` and read during runtime rather than
-      # being a raw, unencrypted value at eval time.
-      password = lib.mkOption {
-        type = lib.types.str;
-        default = "CHANGEME";
+      passwordFile = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+				default = null;
         description = "The password to use for the Plane database.";
       };
 
@@ -160,16 +186,10 @@ in
         description = "The region to use for the Plane storage.";
       };
 
-      accessKey = lib.mkOption {
-        type = lib.types.str;
-        default = "CHANGEME";
+      credentialsFile = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
         description = "The access key to use for the Plane storage.";
-      };
-
-      secretKey = lib.mkOption {
-        type = lib.types.str;
-        default = "CHANGEME";
-        description = "The secret key to use for the Plane storage.";
       };
 
       host = lib.mkOption {
@@ -219,12 +239,24 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+		assertions = [
+			{
+				assertion = cfg.database.local -> cfg.database.passwordFile != null;
+				message = "A password file must be provided for the local database.";
+			}
+			{
+				assertion = cfg.storage.local -> cfg.storage.credentialsFile != null;
+				message = "A credentials file must be provided for the local storage.";
+			}
+		];
+
     users = {
       users = lib.optionalAttrs (cfg.user == "plane") {
         plane = {
           group = cfg.group;
           home = cfg.stateDir;
           isSystemUser = true;
+					extraGroups = [ "minio" ];
         };
       };
 
@@ -300,7 +332,7 @@ in
             WorkingDirectory = cfg.stateDir;
           };
 
-          script = ''
+          script = withSecrets ''
 						${cfg.package}/bin/apiserver wait_for_db
 						${cfg.package}/bin/apiserver wait_for_migrations
 
@@ -324,7 +356,7 @@ in
             WorkingDirectory = cfg.stateDir;
           };
 
-          script = ''
+          script = withSecrets ''
 						${cfg.package}/bin/apiserver wait_for_db
 						${cfg.package}/bin/apiserver wait_for_migrations
 
@@ -348,8 +380,8 @@ in
 						WorkingDirectory = cfg.stateDir;
 					};
 
-					script = ''
-						${config.services.postgresql.package}/bin/psql -h /var/run/postgresql --command "ALTER USER ${cfg.database.user} WITH PASSWORD '${cfg.database.password}'"
+					script = withSecrets ''
+						${config.services.postgresql.package}/bin/psql -h /var/run/postgresql --command "ALTER USER ${cfg.database.user} WITH PASSWORD '$db_pass'"
 					'';
 				};
 
@@ -382,7 +414,7 @@ in
             WorkingDirectory = cfg.stateDir;
           };
 
-          script = ''
+          script = withSecrets ''
 						${cfg.package}/bin/apiserver wait_for_db
 						${cfg.package}/bin/apiserver migrate
 					'';
@@ -409,7 +441,7 @@ in
             WorkingDirectory = cfg.stateDir;
           };
 
-          script = ''
+          script = withSecrets ''
 						${cfg.package}/bin/apiserver wait_for_db
 						${cfg.package}/bin/apiserver wait_for_migrations
 
@@ -501,9 +533,8 @@ in
 
       minio = lib.mkIf cfg.storage.local {
         enable = true;
-        accessKey = cfg.storage.accessKey;
-        secretKey = cfg.storage.secretKey;
         listenAddress = ":${toString cfg.storage.port}";
+				rootCredentialsFile = cfg.storage.credentialsFile;
       };
 
       redis = lib.mkIf cfg.cache.local {
